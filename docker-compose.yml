@@ -1,0 +1,33 @@
+# FA-MAS with PostgreSQL persistence.
+#   docker compose up --build        -> http://localhost:8000
+# Live LLM mode: put FAMAS_LLM_PROVIDER / FAMAS_LLM_MODEL / API keys in .env (see .env.example).
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: famas
+      POSTGRES_PASSWORD: famas
+      POSTGRES_DB: famas
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U famas"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  app:
+    build: .
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      FAMAS_DATABASE_URL: postgresql://famas:famas@db:5432/famas
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:

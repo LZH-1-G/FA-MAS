@@ -1,0 +1,61 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fa-mas"
+version = "0.1.0"
+description = "FA-MAS: a Failure-Aware Adaptive Multi-Agent System with DAG scheduling and incremental replanning"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "FA-MAS contributors" }]
+keywords = ["multi-agent", "llm", "langgraph", "dag", "replanning", "fault-tolerance"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+  "langgraph>=0.4",
+  "langchain-core>=0.3",
+  "networkx>=3.2",
+  "pydantic>=2.6",
+  "fastapi>=0.110",
+  "uvicorn[standard]>=0.29",
+  "httpx>=0.27",
+  "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+openai = ["langchain-openai>=0.2"]
+anthropic = ["langchain-anthropic>=0.2"]
+postgres = ["psycopg[binary]>=3.1"]
+bench = ["pandas>=2.0", "matplotlib>=3.8"]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.5"]
+all = [
+  "fa-mas[openai,anthropic,postgres,bench,dev]",
+]
+
+[project.scripts]
+famas = "famas.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["famas*"]
+
+[tool.setuptools.package-data]
+famas = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-q"
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+ignore = ["E501", "B008", "SIM105", "SIM108", "UP007", "UP045"]
