@@ -151,16 +151,20 @@ class RestartPolicy(RecoveryPolicy):
         for rec in failures:
             task = graph.get(rec.task_id)
             ftype, transient, *_ = self.analyzer.classify(rec, task, graph)
-            exhausted = len(task.failures) >= task.max_attempts
+            exhausted = len(task.failures) >= task.max_attempts or rec.fatal
             out.append(
                 Diagnosis(
                     task_id=task.id,
                     failure_type=ftype,
                     transient=transient,
                     strategy=RecoveryStrategy.ABORT if exhausted else RecoveryStrategy.RESTART,
-                    rationale="attempt budget exhausted"
-                    if exhausted
-                    else "restart the workflow from scratch",
+                    rationale=(
+                        f"non-recoverable provider condition ({rec.error_type})"
+                        if rec.fatal
+                        else "attempt budget exhausted"
+                        if exhausted
+                        else "restart the workflow from scratch"
+                    ),
                 )
             )
         return out

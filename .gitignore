@@ -1,17 +1,38 @@
+# Python
 __pycache__/
 *.py[cod]
 *.egg-info/
 .venv/
 venv/
-.env
-data/
-*.db
-*.sqlite
+build/
+dist/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
-dist/
-build/
+.coverage
+htmlcov/
+
+# Local configuration and secrets (only the documented template is tracked)
+.env
+.env.*
+!.env.example
+
+# Local runtime data: run database, Claude usage logs and validation reports, sandbox/work dirs
+data/
+*.db
+*.sqlite
+*.log
+
+# Frontend
 node_modules/
 frontend/dist/
+
+# Editors, OS and local tool state
 .DS_Store
+.idea/
+.vscode/
+.claude/settings.local.json
+
+# Local-only artefacts (archives, patches handed over for manual application)
+*.zip
+*.patch

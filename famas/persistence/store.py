@@ -75,6 +75,8 @@ SCHEMA = [
 ]
 
 RUN_JSON_FIELDS = {"config", "analysis", "graph", "metrics", "replans"}
+# Columns update_run may touch. Column names are interpolated into SQL, so they are whitelisted.
+RUN_UPDATABLE = {"status", "error", "analysis", "graph", "metrics", "replans", "final_output", "finished_at"}
 
 
 def _dumps(v: Any) -> str | None:
@@ -156,6 +158,9 @@ class Store:
     def update_run(self, run_id: str, **fields: Any) -> None:
         if not fields:
             return
+        unknown = set(fields) - RUN_UPDATABLE
+        if unknown:
+            raise ValueError(f"cannot update run columns {sorted(unknown)}")
         cols, vals = [], []
         for k, v in fields.items():
             cols.append(f"{k} = ?")

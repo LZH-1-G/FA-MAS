@@ -41,7 +41,7 @@ class ExecContext:
 
     @property
     def live(self) -> bool:
-        return not self.run.llm.is_mock
+        return self.run.llm.live_tools
 
     async def llm(
         self,

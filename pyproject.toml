@@ -1,19 +1,23 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "fa-mas"
-version = "0.1.0"
+version = "0.1.0b0"  # v0.1.0-beta
 description = "FA-MAS: a Failure-Aware Adaptive Multi-Agent System with DAG scheduling and incremental replanning"
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "MIT" }
-authors = [{ name = "FA-MAS contributors" }]
-keywords = ["multi-agent", "llm", "langgraph", "dag", "replanning", "fault-tolerance"]
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+authors = [{ name = "lzh" }]
+keywords = ["multi-agent", "llm", "langgraph", "dag", "replanning", "fault-tolerance", "claude-agent-sdk"]
 classifiers = [
+  "Development Status :: 4 - Beta",
   "Programming Language :: Python :: 3",
-  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
   "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
@@ -30,11 +34,14 @@ dependencies = [
 [project.optional-dependencies]
 openai = ["langchain-openai>=0.2"]
 anthropic = ["langchain-anthropic>=0.2"]
+# Experimental Claude Agent SDK provider for personal local testing (Claude Code + your own Claude login;
+# bundles the Claude Code CLI)
+claude = ["claude-agent-sdk>=0.2.159"]
 postgres = ["psycopg[binary]>=3.1"]
 bench = ["pandas>=2.0", "matplotlib>=3.8"]
 dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.5"]
 all = [
-  "fa-mas[openai,anthropic,postgres,bench,dev]",
+  "fa-mas[openai,anthropic,claude,postgres,bench,dev]",
 ]
 
 [project.scripts]
@@ -59,3 +66,9 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM"]
 ignore = ["E501", "B008", "SIM105", "SIM108", "UP007", "UP045"]
+
+
+[project.urls]
+Homepage = "https://github.com/LZH-1-G/FA-MAS"
+Repository = "https://github.com/LZH-1-G/FA-MAS"
+Issues = "https://github.com/LZH-1-G/FA-MAS/issues"

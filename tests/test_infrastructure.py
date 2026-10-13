@@ -179,3 +179,28 @@ def test_cli_lists(capsys):
     assert main(["scenarios"]) == 0
     assert "corruption" in capsys.readouterr().out
     assert main(["systems"]) == 0
+
+
+def test_cost_totals_do_not_depend_on_reporting_order():
+    """Concurrent tasks report usage in runtime-dependent order; totals must not change."""
+    import itertools
+
+    from famas.llm.base import LLMUsage
+    from famas.monitoring.metrics import MetricsCollector
+
+    # 0.1 + 0.2 + 0.3 != 0.3 + 0.2 + 0.1 in floating point; fsum makes the totals order-independent.
+    usages = [
+        ("agent:a", 0.1),
+        ("agent:a", 0.2),
+        ("agent:a", 0.3),
+        ("failure_analyzer", 1e-7),
+        ("agent:c", 0.017),
+    ]
+    totals = set()
+    for order in itertools.permutations(usages):
+        m = MetricsCollector()
+        for comp, cost in order:
+            m.record_llm(comp, LLMUsage(cost=cost), agent_id=comp)
+        out = m.summarize(TaskGraph(), [], 0.0, True, True)
+        totals.add((out.cost, out.overhead_cost, out.by_component["agent:a"].cost))
+    assert len(totals) == 1

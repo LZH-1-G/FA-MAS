@@ -19,6 +19,9 @@ export default function NewRun({ meta }: { meta: Meta }) {
 
   const sys = meta.systems.find((s) => s.name === system);
   const sc = meta.scenarios.find((s) => s.name === scenario);
+  const claude = meta.llm_provider === "claude_agent_sdk";
+  const liveLabel = claude ? "Claude Agent (experimental)" : "Live LLM";
+  const liveHint = meta.live_available ? "" : claude ? " (unavailable)" : " (configure API key)";
 
   async function submit() {
     setBusy(true);
@@ -79,12 +82,13 @@ export default function NewRun({ meta }: { meta: Meta }) {
               ))}
             </select>
           </label>
-          <label>
+          <label title={meta.live_reason}>
             Mode
             <select value={mode} onChange={(e) => setMode(e.target.value as "mock" | "live")}>
               <option value="mock">Mock LLM (deterministic)</option>
               <option value="live" disabled={!meta.live_available}>
-                Live LLM {meta.live_available ? "" : "(configure API key)"}
+                {liveLabel}
+                {liveHint}
               </option>
             </select>
           </label>
@@ -115,6 +119,11 @@ export default function NewRun({ meta }: { meta: Meta }) {
         <div className="small muted" style={{ marginTop: 10 }}>
           {sys && <div><b>{sys.title}.</b> {sys.description}</div>}
           {sc && <div><b>{sc.title}.</b> {sc.description}</div>}
+          {meta.live_reason && (mode === "live" || (claude && !meta.live_available)) && (
+            <div>
+              <b>{liveLabel}:</b> {meta.live_reason}
+            </div>
+          )}
         </div>
         <div className="row" style={{ marginTop: 14 }}>
           <button className="primary" disabled={busy || request.trim().length < 3} onClick={submit}>

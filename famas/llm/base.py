@@ -26,6 +26,9 @@ Tier = Literal["small", "large", "none"]
 
 class LLMError(Exception):
     transient = False
+    # A fatal error means "stop the run": retrying, reassigning or replanning cannot help
+    # (provider disabled, wrong credentials, subscription usage limit reached, ...).
+    fatal = False
 
 
 class LLMTimeout(LLMError):
@@ -38,6 +41,29 @@ class LLMRateLimit(LLMError):
 
 class LLMOutputError(LLMError):
     """The model answered, but the answer could not be parsed into the schema."""
+
+
+class LLMFatalError(LLMError):
+    """Non-recoverable provider condition. The failure analyzer aborts the run instead of replanning."""
+
+    transient = False
+    fatal = True
+
+
+class LLMConfigError(LLMFatalError):
+    """The provider is disabled, not installed or misconfigured."""
+
+
+class LLMAuthError(LLMFatalError):
+    """Missing or disallowed credentials (e.g. an API key where a subscription login is required)."""
+
+
+class LLMUsageLimit(LLMFatalError):
+    """A usage limit was reached, or continuing would draw on pay-as-you-go extra usage."""
+
+
+class LLMBudgetExceeded(LLMFatalError):
+    """A FA-MAS-side budget (e.g. maximum model calls per run) was exhausted."""
 
 
 @dataclass
@@ -119,3 +145,20 @@ class LLMClient(ABC):
 
     def model_for(self, tier: Tier) -> str:
         return self.name
+
+    @property
+    def live_tools(self) -> bool:
+        """Whether agents should use live external tools (GitHub API, real code timing).
+
+        True for real models; False for the mock model and for scripted dry runs, which
+        use the offline knowledge fixtures so they never touch the network.
+        """
+        return not self.is_mock
+
+    async def preflight(self) -> None:
+        """Cheap checks run once before a run starts (no model calls). Raise ``LLMError`` to refuse."""
+        return None
+
+    def describe(self) -> dict[str, Any]:
+        """Non-secret description of the client for health endpoints and logs."""
+        return {"name": self.name, "mock": self.is_mock}

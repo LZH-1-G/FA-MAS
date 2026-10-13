@@ -187,6 +187,7 @@ class FailureRecord(BaseModel):
     error_type: str
     message: str
     transient_hint: bool | None = None
+    fatal: bool = False  # provider-level condition that no recovery strategy can fix (see LLMFatalError)
     evaluation: Evaluation | None = None
     partial_result: TaskResult | None = None
     tokens_wasted: int = 0
@@ -438,7 +439,12 @@ class RunMetrics(BaseModel):
     tokens_out: int = 0
     total_tokens: int = 0
     cost: float = 0.0
+    # LLM calls charged by the run's cost model, including simulated ones (see simulated_llm_calls).
     llm_calls: int = 0
+    # Calls that the failure injector only *modelled*: an injected timeout charges the tokens, cost
+    # and time a timed-out call would have consumed, but no prompt is sent to any model.
+    # Real model calls = llm_calls - simulated_llm_calls.
+    simulated_llm_calls: int = 0
     agent_invocations: int = 0
     task_executions: int = 0
     failed_executions: int = 0

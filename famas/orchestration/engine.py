@@ -63,12 +63,15 @@ class Engine:
         persistent_cache: ResultCache | None = None,
         checkpointer: Any = None,
         keep_events: bool = True,
+        llm_factory: Callable[..., Any] | None = None,
     ) -> None:
         self.settings = settings or get_settings()
         self.registry = registry or AgentRegistry()
         self.stats = stats
         self.persistent_cache = persistent_cache
         self.keep_events = keep_events
+        # create_llm(mode, settings, time_scale=...) by default; injectable for instrumentation.
+        self.llm_factory = llm_factory
         if (
             checkpointer is None
             and self.settings.checkpointer == "memory"
@@ -100,7 +103,7 @@ class Engine:
             )
         else:
             cache = NullCache()
-        llm = create_llm(
+        llm = (self.llm_factory or create_llm)(
             config.mode, self.settings, time_scale=0.0 if config.simulated_clock else config.time_scale
         )
         return RunContext(
@@ -141,6 +144,9 @@ class Engine:
         )
         state: dict[str, Any] = {}
         try:
+            # Provider checks that need no model call (e.g. the Claude Agent SDK provider refuses to
+            # run when real calls are disabled or an API key would be billed instead of a subscription).
+            await ctx.llm.preflight()
             state = await self.workflow.ainvoke(
                 {"run_id": ctx.run_id, "request": request, "rounds": 0, "status": "running"},
                 {"configurable": {"thread_id": ctx.run_id}, "recursion_limit": 1000},

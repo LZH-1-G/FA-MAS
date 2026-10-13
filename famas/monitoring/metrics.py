@@ -14,10 +14,22 @@ component, task executions, failures, reuse decisions) and turns them into a
   already produced a valid (non-corrupted) result earlier in the run.
 * **wasted tokens** – agent tokens spent on executions whose results are not part
   of the final, valid graph state.
+* **llm calls** – every usage record charged to the run, i.e. real model requests
+  plus *simulated* calls; **simulated llm calls** – injected timeouts, which are
+  charged like a timed-out request (prompt tokens, cost, time) but send nothing.
+  Real model requests = ``llm_calls - simulated_llm_calls``.
+* **agent invocations** – agent task executions, including attempts that failed
+  before or without reaching a model (one per attempt, not per LLM request).
+* **cost** – sum of the per-call costs (USD), computed with ``math.fsum`` so the
+  total is the float nearest the exact sum, independent of reporting order, then
+  rounded to 6 decimals. Per-call costs are exact decimals in principle (tokens ×
+  price per 1M); when a total lies exactly halfway between two micro-dollars, the
+  float representation decides the direction, deterministically.
 """
 
 from __future__ import annotations
 
+import math
 from collections import defaultdict
 
 from famas.core.models import ComponentUsage, ReplanRecord, RunMetrics, TaskStatus
@@ -33,26 +45,40 @@ class MetricsCollector:
         self.executions = 0
         self.failed_executions = 0
         self.agent_invocations = 0
+        self.simulated_llm_calls = 0
         self.cache_hits = 0
         self.redundant_executions = 0
         self.execution_tokens: dict[str, int] = {}  # result_id -> tokens
         self.failed_tokens = 0
         self._valid_fps: dict[str, set[str]] = defaultdict(set)
+        # Costs are summed with math.fsum over every recorded call, so totals do not depend on the
+        # order in which concurrent tasks report usage (keeps benchmarks bit-for-bit reproducible
+        # across the LangGraph runtime and the fallback runtime).
+        self._component_costs: dict[str, list[float]] = defaultdict(list)
+        self._agent_costs: dict[str, list[float]] = defaultdict(list)
 
     # ------------------------------------------------------------ recording
-    def record_llm(self, component: str, usage: LLMUsage, agent_id: str | None = None) -> None:
+    def record_llm(
+        self, component: str, usage: LLMUsage, agent_id: str | None = None, *, simulated: bool = False
+    ) -> None:
+        """Record one LLM call's usage. ``simulated=True`` marks usage that the failure injector
+        modelled without sending a prompt (counted in ``llm_calls`` and ``simulated_llm_calls``)."""
+        if simulated:
+            self.simulated_llm_calls += usage.calls
         c = self.by_component[component]
         c.calls += usage.calls
         c.tokens_in += usage.tokens_in
         c.tokens_out += usage.tokens_out
-        c.cost += usage.cost
+        self._component_costs[component].append(usage.cost)
+        c.cost = math.fsum(self._component_costs[component])
         c.duration_ms += usage.duration_ms
         if agent_id:
             a = self.by_agent[agent_id]
             a.calls += usage.calls
             a.tokens_in += usage.tokens_in
             a.tokens_out += usage.tokens_out
-            a.cost += usage.cost
+            self._agent_costs[agent_id].append(usage.cost)
+            a.cost = math.fsum(self._agent_costs[agent_id])
             a.duration_ms += usage.duration_ms
 
     def record_execution(
@@ -79,11 +105,13 @@ class MetricsCollector:
     ) -> RunMetrics:
         tin = sum(c.tokens_in for c in self.by_component.values())
         tout = sum(c.tokens_out for c in self.by_component.values())
-        cost = sum(c.cost for c in self.by_component.values())
+        cost = math.fsum(x for parts in self._component_costs.values() for x in parts)
         calls = sum(c.calls for c in self.by_component.values())
         over = [c for k, c in self.by_component.items() if k in OVERHEAD_COMPONENTS]
         overhead_tokens = sum(c.tokens_in + c.tokens_out for c in over)
-        overhead_cost = sum(c.cost for c in over)
+        overhead_cost = math.fsum(
+            x for k, parts in self._component_costs.items() if k in OVERHEAD_COMPONENTS for x in parts
+        )
         overhead_ms = sum(r.overhead_ms for r in replans)
 
         reused = sum(len(r.reused) for r in replans)
@@ -105,6 +133,7 @@ class MetricsCollector:
             total_tokens=tin + tout,
             cost=round(cost, 6),
             llm_calls=calls,
+            simulated_llm_calls=self.simulated_llm_calls,
             agent_invocations=self.agent_invocations,
             task_executions=self.executions,
             failed_executions=self.failed_executions,

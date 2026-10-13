@@ -79,7 +79,13 @@ class GeneralistAgent(BaseAgent):
             repo = subj[s].repo
             if ectx.live and repo:
                 info = await ectx.run.github.repo_overview(repo)
-                material_parts.append(f"# {subj[s].name}\n{info.as_prompt()[:6000]}")
+                material_parts.append(
+                    f"# {subj[s].name}\n"
+                    # sized so the joined material stays under the 20k-char cut below (keeps fences intact)
+                    + prompts.untrusted(
+                        "repository_material", info.as_prompt()[: min(6000, 18000 // max(1, len(subjects)))]
+                    )
+                )
                 sources.extend(info.sources())
             else:
                 ectx.add_time(250.0)

@@ -77,6 +77,8 @@ h4 { font-size: 13px; color: var(--text-2); text-transform: uppercase; letter-sp
 .pill { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: var(--surface-2); color: var(--text-2); border: 1px solid var(--border); }
 .page { padding: 20px; max-width: 1500px; margin: 0 auto; }
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
+/* cards are grid items: let them shrink to the page width instead of growing with long chip text */
+.card { min-width: 0; }
 .grid2 { display: grid; grid-template-columns: minmax(0, 3fr) minmax(320px, 2fr); gap: 16px; }
 @media (max-width: 1000px) { .grid2 { grid-template-columns: 1fr; } }
 .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }

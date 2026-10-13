@@ -9382,7 +9382,7 @@
   "redundant_executions": 0,
   "wasted_tokens": 13733,
   "overhead_tokens": 6590,
-  "overhead_cost_usd": 0.001079,
+  "overhead_cost_usd": 0.001078,
   "overhead_s": 7.476,
   "had_failures": 1,
   "recovered": 1,

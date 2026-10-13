@@ -6,7 +6,9 @@ services:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: famas
-      POSTGRES_PASSWORD: famas
+      # Local-development default; set POSTGRES_PASSWORD in .env for anything else. The database
+      # port is not published outside the compose network.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-famas}
       POSTGRES_DB: famas
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -22,9 +24,10 @@ services:
       - path: .env
         required: false
     environment:
-      FAMAS_DATABASE_URL: postgresql://famas:famas@db:5432/famas
+      FAMAS_DATABASE_URL: postgresql://famas:${POSTGRES_PASSWORD:-famas}@db:5432/famas
     ports:
-      - "8000:8000"
+      # Published on the loopback interface only: the API has no authentication.
+      - "127.0.0.1:8000:8000"
     depends_on:
       db:
         condition: service_healthy

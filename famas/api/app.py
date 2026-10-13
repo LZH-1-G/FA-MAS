@@ -10,6 +10,7 @@ from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -17,7 +18,7 @@ from famas import __version__
 from famas.api.runs import RunManager
 from famas.benchmark.dataset import DEFAULT_TASKS, EXAMPLE_REQUESTS
 from famas.benchmark.runner import BenchmarkConfig, run_benchmark, summarize
-from famas.config import Settings, get_settings
+from famas.config import CLAUDE_PROVIDER, LOCAL_UI_ORIGINS, Settings, get_settings
 from famas.core.models import InjectionRule, RunConfig, SystemName, new_id
 from famas.orchestration.engine import Engine
 from famas.orchestration.graph_runtime import LANGGRAPH_AVAILABLE
@@ -25,6 +26,23 @@ from famas.orchestration.stats import AgentStatsStore
 from famas.orchestration.systems import SYSTEMS
 from famas.persistence.store import Store, StoreResultCache
 from famas.simulation.scenarios import SCENARIOS
+
+LOCAL_ORIGINS = LOCAL_UI_ORIGINS.split(",")
+
+
+def cors_origins(settings: Settings) -> list[str]:
+    """Origins allowed by CORS. A wildcard is never used while a live model provider is configured
+    (even if not usable yet), so other web pages cannot start runs that spend API credit or
+    subscription usage."""
+    origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
+    if "*" in origins and settings.llm_provider != "mock":
+        return LOCAL_ORIGINS
+    return origins
+
+
+def allowed_hosts(settings: Settings) -> list[str]:
+    hosts = [h.strip() for h in settings.allowed_hosts.split(",") if h.strip()]
+    return hosts or ["localhost", "127.0.0.1"]
 
 
 class RunRequest(BaseModel):
@@ -71,34 +89,53 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
     app = FastAPI(title="FA-MAS API", version=__version__, lifespan=lifespan)
     app.state.manager = manager
     app.state.store = store
+    # The API has no user accounts: it is meant for this machine only. Two browser-level guards:
+    # CORS keeps other web pages from calling it, and the Host check defeats DNS rebinding
+    # (a malicious page re-pointing its own domain at 127.0.0.1).
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[o.strip() for o in settings.cors_origins.split(",")],
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_origins=cors_origins(settings),
+        allow_methods=["GET", "POST", "DELETE"],
+        allow_headers=["Content-Type"],
     )
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts(settings))
 
     # ------------------------------------------------------------- meta
+    def llm_status() -> dict[str, Any]:
+        """Provider configuration for the UI. Never includes credentials; makes no model call."""
+        if settings.llm_provider == CLAUDE_PROVIDER:
+            from famas.llm.claude_agent_sdk_client import provider_status
+
+            return provider_status(settings)
+        available, reason = settings.live_status()
+        return {"provider": settings.llm_provider, "live_available": available, "reason": reason}
+
     @app.get("/api/health")
     def health() -> dict[str, Any]:
+        llm = llm_status()
         return {
             "status": "ok",
             "version": __version__,
             "langgraph": LANGGRAPH_AVAILABLE,
             "llm_provider": settings.llm_provider,
-            "live_available": settings.live_available,
+            "live_available": llm["live_available"],
+            "live_reason": llm["reason"],
+            "llm": llm,
             "database": store.dialect,
         }
 
     @app.get("/api/meta")
     def meta() -> dict[str, Any]:
+        live_ok, live_reason = settings.live_status()
         return {
             "systems": [s.model_dump(mode="json") for s in SYSTEMS.values()],
             "scenarios": [s.model_dump(mode="json") for s in SCENARIOS.values()],
             "agents": [a.model_dump(mode="json") for a in engine.registry.specs()],
             "examples": EXAMPLE_REQUESTS,
             "benchmark_tasks": [t.model_dump() for t in DEFAULT_TASKS],
-            "live_available": settings.live_available,
+            "live_available": live_ok,
+            "live_reason": live_reason,
+            "llm_provider": settings.llm_provider,
             "default_time_scale": settings.ui_time_scale,
         }
 
@@ -112,10 +149,10 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
     # ------------------------------------------------------------- runs
     @app.post("/api/runs", status_code=201)
     async def create_run(body: RunRequest) -> dict[str, str]:
-        if body.mode == "live" and not settings.live_available:
-            raise HTTPException(
-                400, "live mode requires FAMAS_LLM_PROVIDER and an API key (see .env.example)"
-            )
+        if body.mode == "live":
+            live_ok, live_reason = settings.live_status()
+            if not live_ok:
+                raise HTTPException(400, f"live mode is not available: {live_reason}")
         if body.scenario not in SCENARIOS:
             raise HTTPException(400, f"unknown scenario {body.scenario!r}")
         cfg = RunConfig(

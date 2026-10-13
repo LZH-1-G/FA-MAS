@@ -59,18 +59,25 @@ class CodingAgent(BaseAgent):
                 subjects[subject_from_key(skey).name] = _flatten(sf)
         data = {"subjects": subjects, "features": FEATURE_KEYWORDS}
 
-        prompt = prompts.CODING_PROMPT.format(
-            description=task.description, feedback=self.feedback_block(task)
-        )
-        resp = await ectx.llm(
-            system=prompts.CODING_SYSTEM,
-            prompt=prompt,
-            schema=CodeProposal,
-            mock=lambda: MockReply(
-                parsed=CodeProposal(code=FEATURE_MATRIX_CODE, explanation="keyword feature matrix")
-            ),
-        )
-        proposal: CodeProposal = resp.parsed
+        # With a real model, executing model-written code is opt-in (FAMAS_ALLOW_GENERATED_CODE): the
+        # sandbox limits CPU, memory and file sizes but does not isolate the network or the user's
+        # files. Without it, the agent runs FA-MAS's own reviewed program and makes no model call.
+        generated = not ectx.live or ectx.run.settings.allow_generated_code
+        if generated:
+            prompt = prompts.CODING_PROMPT.format(
+                description=task.description, feedback=self.feedback_block(task)
+            )
+            resp = await ectx.llm(
+                system=prompts.CODING_SYSTEM,
+                prompt=prompt,
+                schema=CodeProposal,
+                mock=lambda: MockReply(
+                    parsed=CodeProposal(code=FEATURE_MATRIX_CODE, explanation="keyword feature matrix")
+                ),
+            )
+            proposal: CodeProposal = resp.parsed
+        else:
+            proposal = CodeProposal(code=FEATURE_MATRIX_CODE, explanation="built-in program")
         run = await ectx.run.sandbox.run(proposal.code, data)
         ectx.add_time(run.duration_ms if ectx.live else 120.0)
         if not run.ok:
@@ -94,6 +101,11 @@ class CodingAgent(BaseAgent):
             "_Computed by the coding agent: a feature is marked when the research text mentions one of its keywords. "
             "It reflects documentation coverage, not a quality judgement._"
         )
+        if not generated:
+            lines.append(
+                "_Computed with FA-MAS's built-in program: execution of model-written code is disabled "
+                "(set FAMAS_ALLOW_GENERATED_CODE=true to enable it)._"
+            )
         table = "\n".join(lines)
         return AgentOutput(
             content=table,
@@ -102,6 +114,7 @@ class CodingAgent(BaseAgent):
                 "scores": scores,
                 "features": feats,
                 "code": proposal.code,
+                "code_origin": "model" if generated else "builtin",
                 "units": {"code:feature_matrix": table} if matrix else {},
             },
             sources=[Source(title="Computed from upstream research", kind="derived")],

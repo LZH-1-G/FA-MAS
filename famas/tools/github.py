@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import base64
+import re
 from dataclasses import dataclass, field
 
 import httpx
 
 from famas.core.models import Source
+
+# "owner/name" as GitHub allows it. Repository names can come from model output (the task analyzer),
+# so they are validated before being placed in an API URL that may carry GITHUB_TOKEN.
+REPO_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})/[A-Za-z0-9._-]{1,100}$")
 
 
 class ToolError(RuntimeError):
@@ -86,6 +91,8 @@ class GitHubClient:
         return r
 
     async def repo_overview(self, repo: str) -> RepoInfo:
+        if not REPO_RE.match(repo or "") or ".." in repo:
+            raise ToolError(f"invalid GitHub repository name {repo!r}", transient=False)
         if repo in self._cache:
             return self._cache[repo]
         async with httpx.AsyncClient(

@@ -78,14 +78,56 @@ Defined in `famas/monitoring/metrics.py` and `famas/benchmark/runner.py`:
 | Completed | run finished with every task completed or skipped |
 | Correct | completed **and** the final output does not derive from a corrupted result (simulation ground truth) |
 | Latency | virtual end-to-end time, including planning and recovery |
-| Tokens / cost | all LLM calls: agents, analyzer, planner, evaluator, recovery components |
-| Agent invocations | task executions (including failed ones) |
+| Tokens / cost (`tokens`, `cost_usd`) | all LLM calls charged to the run: agents, analyzer, planner, evaluator, recovery components, plus the modelled cost of injected timeouts. Cost is in USD and rounded to 6 decimals (see below). |
+| LLM calls (`llm_calls`) | every usage record charged to the run: real model requests **plus simulated calls** |
+| Simulated LLM calls (`simulated_llm_calls`, run metrics only) | injected timeouts. Each is charged like a request that hit the client timeout (prompt tokens, cost, 20 s) but **sends nothing to a model**. Real model requests = `llm_calls − simulated_llm_calls`. |
+| Agent invocations (`agent_invocations`, "Agent calls" in tables) | agent task executions, one per attempt, including failed attempts that never reached a model. Not the number of LLM requests. |
+| Task executions / failed executions | attempts started / attempts that ended in a failure |
 | Recovery success | share of runs that met ≥ 1 failure and still produced a correct output |
 | Reuse rate | Σ preserved completed results / Σ (preserved + invalidated) over recovery rounds |
 | Invalid reuse rate | preserved results that were in fact corrupted or derived from corruption / preserved results |
 | Redundant executions | executions whose exact inputs (fingerprint) had already produced a valid result in the run |
 | Wasted tokens | agent tokens spent on executions whose results are not in the final valid graph |
 | Replanning overhead | tokens/cost/time of failure analysis, replanner, re-planning and audit calls |
+
+### Cost arithmetic and reproducibility
+
+Per-call cost is `(tokens_in × input price + tokens_out × output price) / 1,000,000`. With the nominal prices
+above, every per-call cost is an exact multiple of $0.00000005. A run total is the sum of its per-call costs,
+computed with `math.fsum`: the result is the float nearest the exact sum, whatever order concurrent tasks
+report their usage in. It is then rounded to 6 decimals.
+
+Because costs move in steps of half a ten-millionth, a total can fall **exactly halfway** between two
+micro-dollars (for example $0.0920085). Binary floating point cannot represent that midpoint, so the rounding
+direction of such a tie is decided by representation error. It is deterministic and platform-independent, but
+it follows no decimal rounding rule. Every other total equals the exact decimal cost rounded to 6 places.
+
+This was checked against all 2,536 cost values in the committed results (1,268 runs × `cost_usd` and
+`overhead_cost_usd`):
+
+* 2,348 values equal the exactly rounded decimal cost;
+* 188 are exact ties, and each holds one of its two valid 6-decimal roundings.
+
+**Why six committed values changed in v0.1.0-beta.** Earlier totals were accumulated with sequential `+=`,
+plus a per-component `sum()`. Switching to `math.fsum` (to make totals independent of reporting order) changed
+the direction of six ties by ±$0.000001. No token count, timing, outcome or other metric changed, and every
+`summary.json` and `summary.md` is byte-identical:
+
+| Set | Run (task / scenario / system / seed) | Field | Exact cost | Before | After |
+|---|---|---|---|---:|---:|
+| main | T4 / corruption / naive_incremental / 0 | `cost_usd` | 0.0920085 | 0.092009 | 0.092008 |
+| main | T4 / cascade / naive_incremental / 0 | `cost_usd` | 0.0921885 | 0.092189 | 0.092188 |
+| main | T6 / stochastic / fa_mas_verify / 3 | `overhead_cost_usd` | 0.0006585 | 0.000658 | 0.000659 |
+| detect 0.5 | T5 / cascade / fa_mas_verify / 2 | `overhead_cost_usd` | 0.0010785 | 0.001079 | 0.001078 |
+| detect 0.8 | T4 / corruption / naive_incremental / 8 | `cost_usd` | 0.0920085 | 0.092009 | 0.092008 |
+| detect 0.8 | T4 / cascade / naive_incremental / 8 | `cost_usd` | 0.0921885 | 0.092189 | 0.092188 |
+
+The old values remain in the Git history. `tests/test_metrics_accounting.py` pins these rows and checks the
+exact-decimal property on random inputs.
+
+Rounding ties with an explicit decimal rule (half-even or half-up) would need exact decimal accounting. It would
+change 75 (half-even) or 107 (half-up) stored values by $0.000001, with every summary unchanged. It is left for
+a future release so that the published datasets stay as they are.
 
 ## Reproduce
 
@@ -94,7 +136,10 @@ famas bench --plots --out benchmarks/results                      # main table (
 famas bench --scenarios corruption,cascade --tasks T2,T3,T4,T5,T6 \
   --systems full_replan,naive_incremental,fa_mas,fa_mas_verify \
   --det-seeds 0,1,2,3,4,5,6,7,8,9 --detect 0.5 --plots --out benchmarks/results/detect_0.5
+# the detect 0.8 set uses the same command with --detect 0.8 --out benchmarks/results/detect_0.8
 ```
+
+`scripts/verify-offline.sh` regenerates all three sets and checks that they are byte-identical to the committed files.
 
 Outputs: `results.csv` (one row per run), `summary.json`, `summary.md`, and figures.
 

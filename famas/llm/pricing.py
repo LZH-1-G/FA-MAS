@@ -18,6 +18,11 @@ MODEL_PRICES: dict[str, tuple[float, float]] = {
     "deepseek-chat": (0.27, 1.10),
     "claude-sonnet-4-5": (3.00, 15.00),
     "claude-haiku-4-5": (1.00, 5.00),
+    # Claude Code model aliases (Claude Agent SDK provider). Used only when Claude Code does not
+    # report its own cost estimate; on a subscription these are API-equivalent figures, not charges.
+    "sonnet": (3.00, 15.00),
+    "haiku": (1.00, 5.00),
+    "opus": (5.00, 25.00),
 }
 
 DEFAULT_PRICE = (1.00, 4.00)

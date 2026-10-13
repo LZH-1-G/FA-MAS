@@ -86,7 +86,7 @@ class ResearchAgent(BaseAgent):
         material = ""
         if ectx.live and repo:
             info = await ectx.run.github.repo_overview(repo)
-            material = info.as_prompt()
+            material = prompts.untrusted("repository_material", info.as_prompt()[:11500])
             sources = info.sources()
         else:
             ectx.add_time(250.0)  # modelled GitHub API round-trips

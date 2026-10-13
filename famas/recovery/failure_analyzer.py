@@ -39,6 +39,10 @@ EXCEPTION_MAP: dict[str, tuple[FailureType, bool]] = {
     "AgentCrash": (FailureType.AGENT_ERROR, True),
     "SandboxExecutionError": (FailureType.AGENT_ERROR, False),
     "LLMOutputError": (FailureType.INVALID_OUTPUT, False),
+    "LLMUsageLimit": (FailureType.RESOURCE_LIMIT, False),
+    "LLMBudgetExceeded": (FailureType.RESOURCE_LIMIT, False),
+    "LLMAuthError": (FailureType.AGENT_ERROR, False),
+    "LLMConfigError": (FailureType.AGENT_ERROR, False),
     "ValidationError": (FailureType.INVALID_OUTPUT, False),
 }
 
@@ -143,6 +147,11 @@ class FailureAnalyzer:
             strategy=RecoveryStrategy.RETRY,
             missing_units=missing_units,
         )
+        if rec.fatal:  # e.g. usage limit reached or credentials refused: no strategy can help
+            d.strategy = RecoveryStrategy.ABORT
+            d.rationale = f"non-recoverable provider condition ({rec.error_type}): {rec.message[:200]}"
+            d.confidence = 1.0
+            return d
 
         def reassign_or_retry(reason: str) -> None:
             if alternatives:
@@ -290,7 +299,7 @@ class FailureAnalyzer:
         for rec in failures:
             task = graph.get(rec.task_id)
             d = self.decide(rec, task, graph, ctx)
-            if self.mode == "full" and ctx.config.llm_failure_analysis:
+            if self.mode == "full" and ctx.config.llm_failure_analysis and not rec.fatal:
                 d.explanation = await self._explain(rec, task, d, ctx)
             out.append(d)
         return out

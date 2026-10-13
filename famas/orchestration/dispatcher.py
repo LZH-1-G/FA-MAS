@@ -160,7 +160,11 @@ class Dispatcher:
 
     # ------------------------------------------------------------ execute
     async def _burn(self, ectx: ExecContext, fault: Fault, task: Task, inputs: dict[str, TaskResult]) -> None:
-        """Model the resources a failed call consumes before the error surfaces."""
+        """Model the resources a failed call consumes before the error surfaces.
+
+        Nothing is sent to a model here. An injected timeout is charged like a call that ran into the
+        client timeout (prompt tokens, cost, time) and is recorded as a *simulated* LLM call.
+        """
         if fault.kind == "timeout":
             prompt_tokens = 1200 + sum(estimate_tokens(r.content) for r in inputs.values())
             model = self.ctx.llm.model_for(ectx.agent.model_tier)
@@ -174,6 +178,7 @@ class Dispatcher:
                     tokens_in=prompt_tokens, tokens_out=0, cost=cost, duration_ms=TIMEOUT_COST_MS, model=model
                 ),
                 agent_id=ectx.agent.id,
+                simulated=True,
             )
             if not self.ctx.clock.simulated and self.ctx.config.time_scale > 0:
                 await asyncio.sleep(TIMEOUT_COST_MS * self.ctx.config.time_scale / 1000.0)
@@ -307,6 +312,7 @@ class Dispatcher:
                 error_type=etype,
                 message=str(e)[:500],
                 transient_hint=getattr(e, "transient", None),
+                fatal=bool(getattr(e, "fatal", False)),
                 tokens_wasted=tokens,
             )
             return Outcome(

@@ -4,8 +4,8 @@ Start with `famas serve` (default `http://127.0.0.1:8000`). Interactive OpenAPI 
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/health` | status, LangGraph availability, LLM provider, database dialect |
-| GET | `/api/meta` | systems, scenarios, agents, example requests, benchmark tasks |
+| GET | `/api/health` | status, LangGraph availability, LLM provider, `live_available` + `live_reason`, provider status (`llm`: no secrets), database dialect |
+| GET | `/api/meta` | systems, scenarios, agents, example requests, benchmark tasks, `live_available`, `live_reason`, `llm_provider` |
 | GET | `/api/agents` | agent registry + learned per-agent statistics |
 | POST | `/api/runs` | start a run (returns `run_id`) |
 | GET | `/api/runs` | recent runs with headline metrics |
@@ -35,7 +35,9 @@ curl -s -X POST localhost:8000/api/runs -H 'content-type: application/json' -d '
 
 * `simulated: true` runs instantly on the virtual clock; `false` paces mock agents in real time
   (`time_scale` × modelled duration) so the UI can be watched.
-* `mode: "live"` requires a configured provider (see `.env.example`).
+* `mode: "live"` requires a configured provider (see `.env.example`); otherwise the API answers `400` with
+  the reason. With `FAMAS_LLM_PROVIDER=claude_agent_sdk` and real calls enabled, CORS is restricted to the
+  local UI and `famas serve` only binds to localhost (see [claude-agent-sdk.md](claude-agent-sdk.md)).
 * `injection`: optional list of custom fault rules, e.g.
   `[{"kind": "timeout", "target": "research:crewai:*", "on_executions": [1]}]`.
 

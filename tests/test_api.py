@@ -17,7 +17,7 @@ def client(tmp_path):
         Settings(database_url="sqlite:///:memory:", frontend_dist=str(tmp_path / "none")),
         Store("sqlite:///:memory:"),
     )
-    with TestClient(app) as c:
+    with TestClient(app, base_url="http://localhost") as c:
         yield c
 
 

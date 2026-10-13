@@ -98,7 +98,8 @@ export interface RunMetrics {
   tokens_in: number;
   tokens_out: number;
   cost: number;
-  llm_calls: number;
+  llm_calls: number; // real model calls + simulated calls (injected timeouts)
+  simulated_llm_calls: number; // injected timeouts: charged like a call, no prompt sent
   agent_invocations: number;
   task_executions: number;
   failed_executions: number;
@@ -231,6 +232,8 @@ export interface Meta {
   examples: string[];
   benchmark_tasks: { id: string; complexity: string; request: string }[];
   live_available: boolean;
+  live_reason?: string; // why live mode is (un)available; never contains secrets
+  llm_provider?: string; // mock | openai | anthropic | claude_agent_sdk
   default_time_scale: number;
 }
 

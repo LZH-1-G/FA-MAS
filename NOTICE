@@ -1,0 +1,18 @@
+FA-MAS (Failure-Aware Adaptive Multi-Agent System)
+Copyright 2026 lzh
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+No third-party source code is copied into this repository. FA-MAS depends on
+third-party packages that are installed separately (pip / npm) under their own
+licenses; see THIRD_PARTY_NOTICES.md.
+
+The optional Claude Agent SDK provider uses the claude-agent-sdk package, whose
+wheels bundle the Claude Code command-line tool. Claude Code is proprietary
+software of Anthropic, PBC, governed by Anthropic's terms; it is not part of
+FA-MAS and is not redistributed by this repository.
+
+LangGraph, LangChain, CrewAI, AutoGen, Microsoft Agent Framework, Claude,
+Claude Code, Anthropic, GitHub and other product names are trademarks of their
+respective owners. They are used only to identify those products; no
+endorsement is implied.

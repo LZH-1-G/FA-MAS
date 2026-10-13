@@ -1,4 +1,4 @@
-"""Command-line interface: ``famas run | serve | bench | scenarios | systems``."""
+"""Command-line interface: ``famas run | serve | bench | scenarios | systems | claude``."""
 
 from __future__ import annotations
 
@@ -78,8 +78,37 @@ def cmd_run(args: argparse.Namespace) -> int:
     return 0 if outcome.success else 1
 
 
+LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "::1")
+
+
 def cmd_serve(args: argparse.Namespace) -> int:
     import uvicorn
+
+    from famas.config import get_settings
+
+    settings = get_settings()
+    remote = args.host not in LOOPBACK_HOSTS
+    if remote and settings.claude_real_calls_enabled:
+        # Subscription logins are for your own, individual use: serving FA-MAS to other people
+        # would route their requests through your Claude plan, which Anthropic does not permit.
+        print(
+            f"refusing to listen on {args.host}: the Claude Agent SDK provider is using your personal "
+            "Claude subscription, so FA-MAS only serves this machine (127.0.0.1). Use an API-key "
+            "provider for shared deployments."
+        )
+        return 2
+    if remote and settings.live_available and not args.allow_remote:
+        print(
+            f"refusing to listen on {args.host}: the API has no authentication and a live model provider "
+            "is configured, so anyone who can reach this port could spend your API credit. Serve on "
+            "127.0.0.1, or pass --allow-remote if the port is protected by your own firewall/proxy auth."
+        )
+        return 2
+    if remote:
+        print(
+            f"warning: listening on {args.host} without authentication. Requests must use a Host listed "
+            "in FAMAS_ALLOWED_HOSTS (default: localhost only)."
+        )
 
     uvicorn.run("famas.api.app:app_factory", factory=True, host=args.host, port=args.port, reload=args.reload)
     return 0
@@ -133,6 +162,205 @@ def cmd_list(args: argparse.Namespace) -> int:
     return 0
 
 
+def _claude_settings():
+    from famas.config import CLAUDE_PROVIDER, get_settings
+
+    settings = get_settings()
+    if settings.llm_provider != CLAUDE_PROVIDER:
+        # The doctor/smoke commands always describe the Claude provider, whatever FAMAS_LLM_PROVIDER is.
+        settings = settings.model_copy(update={"llm_provider": CLAUDE_PROVIDER})
+    return settings
+
+
+def cmd_claude_doctor(args: argparse.Namespace) -> int:
+    """Report Claude Agent SDK readiness. Never sends a prompt to a model."""
+    import subprocess
+
+    from famas.llm import claude_agent_sdk_client as cs
+
+    settings = _claude_settings()
+    status = cs.provider_status(settings)
+    ok = True
+
+    def line(mark: str, text: str) -> None:
+        print(f"  {mark} {text}")
+
+    print("FA-MAS · Claude Agent SDK provider check (no model calls)")
+    print("experimental: for personal local testing by the account holder only\n")
+    print(f"configured provider : {get_provider_name()}")
+    mode = (
+        "dry run (scripted, offline)"
+        if settings.claude_dry_run
+        else ("REAL CALLS ENABLED" if settings.claude_allow_real_calls else "real calls disabled")
+    )
+    print(f"mode                : {mode}")
+    print(f"models              : large={settings.claude_model}  small={settings.claude_small_model}")
+    lim = status["limits"]
+    print(
+        f"limits              : {lim['max_calls_per_run']} calls/run, {lim['max_parallel']} parallel, "
+        f"{lim['max_turns']} turns/call, {lim['timeout_s']:.0f}s timeout, "
+        f"max ${lim['max_budget_usd_per_call']} est./call\n"
+    )
+
+    version = cs.sdk_version()
+    if version:
+        line("✓", f"claude-agent-sdk {version} installed")
+    else:
+        ok = False
+        line("✗", f"claude-agent-sdk not installed — {cs.INSTALL_HINT}")
+    cli = settings.claude_cli_path or cs.bundled_cli_path()
+    if cli is None:
+        import shutil
+
+        cli = shutil.which("claude")
+    if cli:
+        try:
+            out = subprocess.run([cli, "--version"], capture_output=True, text=True, timeout=30)
+            line("✓", f"Claude Code CLI: {cli} ({(out.stdout or out.stderr).strip()[:60]})")
+        except (OSError, subprocess.SubprocessError) as e:
+            ok = False
+            line("✗", f"Claude Code CLI at {cli} did not run: {e}")
+    elif version:
+        ok = False
+        line("✗", "Claude Code CLI not found (it is normally bundled with claude-agent-sdk)")
+
+    conflicts = status["conflicting_env"]
+    if conflicts:
+        ok = False
+        line(
+            "✗",
+            f"{', '.join(conflicts)} set — Claude Code would not use your subscription login; unset it",
+        )
+    else:
+        line("✓", "no API-key or cloud-provider variables in the environment")
+    for w in cs.user_settings_warnings():
+        line("!", w)
+    guard = status["usage_guard"]
+    if guard["halted"]:
+        ok = False
+        line("✗", f"usage guard halted: {guard['reason']}")
+
+    if args.offline_test:
+        import asyncio
+
+        from famas.llm.base import MockReply
+
+        dry = settings.model_copy(
+            update={"claude_dry_run": True, "claude_allow_real_calls": False, "claude_usage_log": None}
+        )
+        try:
+            client = cs.ClaudeAgentSDKLLM(dry)
+            resp = asyncio.run(
+                client.complete(
+                    component="doctor",
+                    system="offline check",
+                    prompt="ping",
+                    tier="small",
+                    mock=lambda: MockReply(text="pong"),
+                )
+            )
+            line(
+                "✓",
+                f"offline SDK round trip (scripted transport): {resp.text!r}, {resp.usage.tokens_in} tok in",
+            )
+        except Exception as e:  # noqa: BLE001
+            ok = False
+            line("✗", f"offline SDK round trip failed: {type(e).__name__}: {e}")
+
+    if args.check_login:
+        import asyncio
+
+        try:
+            acct = asyncio.run(cs.inspect_login(settings))
+            line(
+                "✓",
+                f"Claude Code login: {acct['subscription_type'] or 'subscription'} plan via "
+                f"{acct['token_source']} ({acct['api_provider']}) — handshake only, no prompt sent",
+            )
+        except Exception as e:  # noqa: BLE001
+            ok = False
+            line("✗", f"login check failed: {e}")
+    else:
+        line("·", "login not checked (add --check-login: starts Claude Code, sends no prompt)")
+
+    print(f"\nlive mode: {'available' if status['live_available'] else 'not available'} — {status['reason']}")
+    return 0 if ok else 1
+
+
+def cmd_claude_validate(args: argparse.Namespace) -> int:
+    from famas.claude_validation import run_validation
+
+    return run_validation(
+        args.test, _claude_settings(), yes=args.yes, out_dir=args.out, scenario=args.scenario
+    )
+
+
+def get_provider_name() -> str:
+    from famas.config import get_settings
+
+    return get_settings().llm_provider
+
+
+def cmd_claude_smoke(args: argparse.Namespace) -> int:
+    """Two tiny calls (plain + structured) to confirm the provider end to end."""
+    import asyncio
+
+    from pydantic import BaseModel
+
+    from famas.llm import claude_agent_sdk_client as cs
+    from famas.llm.base import MockReply
+
+    settings = _claude_settings()
+    if not settings.claude_dry_run:
+        if not settings.claude_allow_real_calls:
+            print("refusing: real calls are disabled (FAMAS_CLAUDE_ALLOW_REAL_CALLS is not true).")
+            print("Use FAMAS_CLAUDE_DRY_RUN=true for an offline smoke test.")
+            return 2
+        if not args.yes:
+            print(
+                "refusing: this makes 2 real Claude calls that count against your subscription usage "
+                "limits. Re-run with --yes to confirm."
+            )
+            return 2
+
+    class Pong(BaseModel):
+        ok: bool
+        word: str
+
+    async def go() -> int:
+        client = cs.ClaudeAgentSDKLLM(settings)
+        await client.preflight()
+        a = await client.complete(
+            component="smoke",
+            system="You are a terse test endpoint.",
+            prompt="Reply with exactly the single word: pong",
+            tier="small",
+            mock=lambda: MockReply(text="pong"),
+        )
+        print(
+            f"plain      : {a.text.strip()[:60]!r} ({a.usage.tokens_in} in / {a.usage.tokens_out} out, "
+            f"model {a.usage.model}, API-equivalent ${a.usage.cost:.4f})"
+        )
+        b = await client.complete(
+            component="smoke",
+            system="You are a terse test endpoint.",
+            prompt="Return ok=true and word='pong'.",
+            schema=Pong,
+            tier="small",
+            mock=lambda: MockReply(parsed=Pong(ok=True, word="pong")),
+        )
+        print(f"structured : {b.parsed!r} ({b.usage.tokens_in} in / {b.usage.tokens_out} out)")
+        note = "  (simulated: dry run)" if settings.claude_dry_run else ""
+        print(f"account    : {client.account}{note}")
+        return 0
+
+    try:
+        return asyncio.run(go())
+    except Exception as e:  # noqa: BLE001
+        print(f"smoke test failed: {type(e).__name__}: {e}")
+        return 1
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="famas", description="FA-MAS: failure-aware adaptive multi-agent system")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -174,6 +402,12 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--host", default="127.0.0.1")
     s.add_argument("--port", type=int, default=8000)
     s.add_argument("--reload", action="store_true")
+    s.add_argument(
+        "--allow-remote",
+        action="store_true",
+        help="allow a non-loopback --host while an API-key provider is configured (never for the "
+        "Claude subscription provider); the API itself has no authentication",
+    )
     s.set_defaults(func=cmd_serve)
 
     b = sub.add_parser("bench", help="run the baseline comparison benchmark")
@@ -194,6 +428,37 @@ def main(argv: list[str] | None = None) -> int:
     for name in ("scenarios", "systems"):
         sp = sub.add_parser(name, help=f"list available {name}")
         sp.set_defaults(func=cmd_list)
+
+    c = sub.add_parser(
+        "claude",
+        help="experimental Claude Agent SDK provider tools (personal local testing, your own login)",
+    )
+    csub = c.add_subparsers(dest="claude_cmd", required=True)
+    d = csub.add_parser("doctor", help="check SDK, CLI, environment and (optionally) login; no model calls")
+    d.add_argument(
+        "--check-login",
+        action="store_true",
+        help="start Claude Code and read the login from the handshake (sends no prompt)",
+    )
+    d.add_argument(
+        "--offline-test",
+        action="store_true",
+        help="round trip through the real SDK with a scripted transport",
+    )
+    d.set_defaults(func=cmd_claude_doctor)
+    v = csub.add_parser(
+        "validate",
+        help="bounded validation tests A (2-call smoke), B (real workflow), C (failure recovery); "
+        "real calls only with --yes",
+    )
+    v.add_argument("test", choices=["a", "b", "c"])
+    v.add_argument("--yes", action="store_true", help="confirm real calls against your subscription")
+    v.add_argument("--out", default="data/claude-validation", help="report directory (gitignored)")
+    v.add_argument("--scenario", help="test C: failure scenario (default: transient)")
+    v.set_defaults(func=cmd_claude_validate)
+    sm = csub.add_parser("smoke", help="2 tiny calls (plain + structured); real only with --yes")
+    sm.add_argument("--yes", action="store_true", help="confirm real calls against your subscription")
+    sm.set_defaults(func=cmd_claude_smoke)
 
     args = p.parse_args(argv)
     return args.func(args)

@@ -1,10 +1,12 @@
 """Minimal subprocess sandbox for agent-generated Python.
 
 Runs code in a separate, isolated (``python -I``) interpreter with a timeout,
-a scrubbed environment (no proxy variables or API keys) and, on POSIX, CPU and
-memory rlimits. This contains accidents, not adversaries: for untrusted code
-in production, run the coding agent inside the provided Docker image or a
-dedicated sandbox service.
+a scrubbed environment (no proxy variables or API keys), an empty temporary
+working directory and, on POSIX, CPU, memory, file-size and open-file rlimits.
+This contains accidents, not adversaries: it does not block network access or
+reads of the user's files. That is why executing *model-written* code is
+opt-in in live mode (``FAMAS_ALLOW_GENERATED_CODE``); for untrusted code run
+the coding agent inside the Docker image or a dedicated sandbox service.
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ import contextlib
 import json
 import os
 import sys
+import tempfile
 import time
 from dataclasses import dataclass
 
@@ -47,6 +50,10 @@ def _limits() -> None:  # pragma: no cover - runs in the child process
         resource.setrlimit(resource.RLIMIT_CPU, (10, 10))
         with contextlib.suppress(ValueError, OSError):
             resource.setrlimit(resource.RLIMIT_AS, (1024 * 1024 * 1024, 1024 * 1024 * 1024))
+        with contextlib.suppress(ValueError, OSError):  # no file larger than 16 MB
+            resource.setrlimit(resource.RLIMIT_FSIZE, (16 * 1024 * 1024, 16 * 1024 * 1024))
+        with contextlib.suppress(ValueError, OSError):
+            resource.setrlimit(resource.RLIMIT_NOFILE, (64, 64))
     except Exception:
         pass
 
@@ -58,6 +65,11 @@ class CodeSandbox:
 
     async def run(self, code: str, data: dict | None = None) -> SandboxResult:
         env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "PYTHONHASHSEED": "0", "LANG": "C.UTF-8"}
+        with tempfile.TemporaryDirectory(prefix="famas-sandbox-") as workdir:
+            env["HOME"] = env["TMPDIR"] = workdir
+            return await self._run(code, data, env, workdir)
+
+    async def _run(self, code: str, data: dict | None, env: dict[str, str], workdir: str) -> SandboxResult:
         t0 = time.perf_counter()
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -69,6 +81,7 @@ class CodeSandbox:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env=env,
+                cwd=workdir,
                 preexec_fn=_limits if os.name == "posix" else None,
             )
         except OSError as e:

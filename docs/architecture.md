@@ -10,7 +10,7 @@ LangGraph workflow). Five layers sit on top of a small shared data model (`famas
 │ Planning       TaskAnalyzer → Planner (LLM / template) → TaskGraph (NetworkX) → Validator │
 │ Orchestration  LangGraph workflow · AgentSelector · Dispatcher (eager DAG scheduler)      │
 │ Execution      Research / Analysis / Coding / Writing / Generalist / Aggregator agents    │
-│                GitHub API tool · code sandbox · LLM clients (LangChain or mock)           │
+│                GitHub API tool · code sandbox · LLM clients (mock / LangChain / Agent SDK)│
 │ Reliability    ResultEvaluator → FailureAnalyzer → DependencyAnalyzer → IncrementalReplanner│
 │ State          EventBus · MetricsCollector · ResultCache · Store (SQLite/PostgreSQL)      │
 │                LangGraph checkpointer                                                     │
@@ -69,7 +69,8 @@ decomposition (a task is split along its units).
 | `aggregator` | none | aggregate | deterministic merge node created by decomposition |
 
 All agents call models through `ExecContext.llm(...)`, passing a deterministic `mock` callback. The same code
-path therefore runs against a real model (LangChain) or the mock model (tests, benchmarks). Typed tasks run by
+path therefore runs against a real model (LangChain, or Claude Code via the Claude Agent SDK, see
+[claude-agent-sdk.md](claude-agent-sdk.md)) or the mock model (tests, benchmarks). Typed tasks run by
 the generalist use the specialists' procedures, so escalating to the generalist never weakens validation.
 
 ## 4. Scheduling
@@ -116,6 +117,7 @@ See [algorithms.md](algorithms.md) for the precise rules. The pieces:
 |---|---|
 | an agent | add an `AgentSpec` to `agents/specs.py` (and an implementation in `agents/registry.AGENT_CLASSES` if it is a new kind) |
 | a tool | implement it in `famas/tools/` and use it from an agent via `ectx.run` |
+| an LLM provider | implement `LLMClient.complete` (and optionally `preflight`, `live_tools`) and return it from `famas/llm/__init__.create_llm`; raise `LLMFatalError` subclasses for conditions that must abort a run |
 | a failure type / strategy | extend `FailureAnalyzer.decide` and `IncrementalReplanner.apply` |
 | a baseline | add a `RecoveryPolicy` and a `SystemSpec` in `orchestration/systems.py` |
 | a scenario | add a `Scenario` to `simulation/scenarios.py` |
