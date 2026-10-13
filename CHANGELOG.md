@@ -2,6 +2,14 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.0-beta.1] — 2026-10-13
+
+### Fixed
+
+- Fixed pytest module imports in GitHub Actions by adding
+  `tests/__init__.py`.
+- Verified that the updated main branch passes GitHub CI.
+
 ## [0.1.0-beta] — 2026-10-13
 
 This is the first public beta. Python package version: `0.1.0b0`.

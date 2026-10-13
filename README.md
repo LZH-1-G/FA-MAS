@@ -1,6 +1,6 @@
 # FA-MAS: Failure-Aware Adaptive Multi-Agent System
 
-> **v0.1.0-beta.** This is a research platform. **Mock mode is the default and the supported public execution
+> **v0.1.0-beta.1.** This is a research platform. **Mock mode is the default and the supported public execution
 > mode**; it and the benchmark are verified. The Claude Agent SDK integration is **experimental**, intended only
 > for personal, local testing by the account holder. Its three bounded real tests (A–C) passed on 2026-10-13 on
 > the maintainer's own Claude Pro login. See [Project status](#project-status).
